@@ -1,15 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyToken, extractToken } from '@/lib/auth';
+import type { Prisma } from '@prisma/client';
 
 // GET - Preview circle info before joining (public, auth required but no membership check)
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const token = extractToken(request.headers.get('authorization'));
+  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const payload = verifyToken(token);
+  if (!payload) return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
+
+  const { id } = await params;
+
   try {
-    const authHeader = request.headers.get('authorization');
-    const token = extractToken(authHeader);
+    const member = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const circle = await tx.circle.findUnique({
+        where: { id },
+        include: { members: true },
+      });
 
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -20,7 +32,9 @@ export async function GET(
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
     }
 
-    const { id } = await params;
+      if (circle.status !== 'PENDING') {
+        throw Object.assign(new Error('Circle is not accepting new members'), { status: 400 });
+      }
 
     const circle = await prisma.circle.findUnique({
       where: { id },
@@ -116,7 +130,7 @@ export async function POST(
         user: {
           select: { id: true, email: true, firstName: true, lastName: true },
         },
-      },
+      });
     });
 
     return NextResponse.json({ success: true, member: newMember }, { status: 201 });
