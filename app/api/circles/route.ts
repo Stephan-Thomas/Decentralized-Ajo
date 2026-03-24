@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyToken, extractToken } from '@/lib/auth';
+import { CircleStatus } from '@prisma/client';
 
 // POST - Create a new circle
 export async function POST(request: NextRequest) {
@@ -88,17 +89,14 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// GET - List circles
+// GET - List circles with pagination and optional status filter
 export async function GET(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization');
     const token = extractToken(authHeader);
 
     if (!token) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const payload = verifyToken(token);
@@ -109,64 +107,71 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get user's circles (as member or organizer)
-    const circles = await prisma.circle.findMany({
-      where: {
-        OR: [
-          { organizerId: payload.userId },
-          {
-            members: {
-              some: {
-                userId: payload.userId,
+    // Parse and validate query params
+    const { searchParams } = request.nextUrl;
+    const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') ?? '10', 10) || 10));
+    const statusParam = searchParams.get('status')?.toUpperCase();
+
+    // Validate status value if provided
+    if (statusParam && !(statusParam in CircleStatus)) {
+      return NextResponse.json(
+        { error: `Invalid status. Must be one of: ${Object.values(CircleStatus).join(', ')}` },
+        { status: 400 }
+      );
+    }
+
+    const skip = (page - 1) * limit;
+
+    // Base where clause — user's circles as member or organizer
+    const where = {
+      OR: [
+        { organizerId: payload.userId },
+        { members: { some: { userId: payload.userId } } },
+      ],
+      // Conditionally add status filter
+      ...(statusParam ? { status: statusParam as CircleStatus } : {}),
+    };
+
+    // Run count and findMany in parallel
+    const [total, circles] = await Promise.all([
+      prisma.circle.count({ where }),
+      prisma.circle.findMany({
+        where,
+        take: limit,
+        skip,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          organizer: {
+            select: { id: true, email: true, firstName: true, lastName: true },
+          },
+          members: {
+            include: {
+              user: {
+                select: { id: true, email: true, firstName: true, lastName: true },
               },
             },
           },
-        ],
-      },
-      include: {
-        organizer: {
-          select: {
-            id: true,
-            email: true,
-            firstName: true,
-            lastName: true,
+          contributions: {
+            select: { amount: true },
           },
         },
-        members: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                firstName: true,
-                lastName: true,
-              },
-            },
-          },
-        },
-        contributions: {
-          select: {
-            amount: true,
-          },
-        },
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
+      }),
+    ]);
 
     return NextResponse.json(
       {
-        success: true,
-        circles,
+        data: circles,
+        meta: {
+          total,
+          pages: Math.ceil(total / limit),
+          currentPage: page,
+        },
       },
       { status: 200 }
     );
   } catch (error) {
     console.error('List circles error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
