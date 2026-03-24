@@ -22,7 +22,7 @@ export const logger = pino({
     err: pino.stdSerializers.err,
     error: pino.stdSerializers.err,
   },
-  transport: (isProduction || process.env.NEXT_RUNTIME === 'edge') ? undefined : {
+  transport: isProduction ? undefined : {
     target: 'pino-pretty',
     options: {
       colorize: true,
@@ -30,14 +30,3 @@ export const logger = pino({
     },
   },
 });
-
-// Global error handlers
-if (typeof window === 'undefined') {
-  process.on('uncaughtException', (err) => {
-    logger.error({ err }, 'Uncaught Exception');
-  });
-
-  process.on('unhandledRejection', (reason, promise) => {
-    logger.error({ reason, promise }, 'Unhandled Rejection');
-  });
-}
