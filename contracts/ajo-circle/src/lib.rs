@@ -20,6 +20,7 @@ pub enum AjoError {
     CircleNotActive = 10,
     CircleAlreadyDissolved = 11,
     CircleAtCapacity = 12,
+    CirclePanicked = 13,
 }
 
 #[contracttype]
@@ -51,6 +52,7 @@ pub enum CircleStatus {
     Active,
     VotingForDissolution,
     Dissolved,
+    Panicked,
 }
 
 /// Tracks an in-progress dissolution vote
@@ -139,6 +141,11 @@ impl AjoCircle {
     pub fn join_circle(env: Env, organizer: Address, new_member: Address) -> Result<(), AjoError> {
         organizer.require_auth();
 
+        // Block joins during panic
+        if Self::get_circle_status(env.clone()) == CircleStatus::Panicked {
+            return Err(AjoError::CirclePanicked);
+        }
+
         let mut circle: CircleData = env
             .storage()
             .instance()
@@ -199,6 +206,11 @@ impl AjoCircle {
     pub fn contribute(env: Env, member: Address, amount: i128) -> Result<(), AjoError> {
         member.require_auth();
 
+        // Block contributions during panic
+        if Self::get_circle_status(env.clone()) == CircleStatus::Panicked {
+            return Err(AjoError::CirclePanicked);
+        }
+
         if amount <= 0 {
             return Err(AjoError::InvalidInput);
         }
@@ -233,6 +245,11 @@ impl AjoCircle {
 
         if circle.organizer != organizer {
             return Err(AjoError::Unauthorized);
+        }
+
+        // Block shuffle during panic
+        if Self::get_circle_status(env.clone()) == CircleStatus::Panicked {
+            return Err(AjoError::CirclePanicked);
         }
 
         let members: Map<Address, MemberData> = env.storage()
@@ -278,6 +295,11 @@ impl AjoCircle {
     /// Claim payout when it's a member's turn
     pub fn claim_payout(env: Env, member: Address) -> Result<i128, AjoError> {
         member.require_auth();
+
+        // Block payouts during panic
+        if Self::get_circle_status(env.clone()) == CircleStatus::Panicked {
+            return Err(AjoError::CirclePanicked);
+        }
 
         let circle: CircleData = env
             .storage()
@@ -326,6 +348,11 @@ impl AjoCircle {
     /// Perform a partial withdrawal with penalty
     pub fn partial_withdraw(env: Env, member: Address, amount: i128) -> Result<i128, AjoError> {
         member.require_auth();
+
+        // Block partial withdrawals during panic — use emergency_refund instead
+        if Self::get_circle_status(env.clone()) == CircleStatus::Panicked {
+            return Err(AjoError::CirclePanicked);
+        }
 
         if amount <= 0 {
             return Err(AjoError::InvalidInput);
@@ -422,6 +449,7 @@ impl AjoCircle {
         match status {
             CircleStatus::Dissolved => return Err(AjoError::CircleAlreadyDissolved),
             CircleStatus::VotingForDissolution => return Err(AjoError::VoteAlreadyActive),
+            CircleStatus::Panicked => return Err(AjoError::CirclePanicked),
             CircleStatus::Active => {}
         }
 
@@ -579,12 +607,105 @@ impl AjoCircle {
             .get(&DataKey::DissolutionVote)
             .ok_or(AjoError::NoActiveVote)
     }
+
+    // ─── Emergency "Panic Button" ─────────────────────────────────────────────
+
+    /// Admin-triggered emergency halt. Only the organizer can call this.
+    /// Sets the circle status to `Panicked`, which blocks all normal operations
+    /// and enables `emergency_refund()` for every member.
+    pub fn panic(env: Env, organizer: Address) -> Result<(), AjoError> {
+        organizer.require_auth();
+
+        let circle: CircleData = env
+            .storage()
+            .instance()
+            .get(&DataKey::Circle)
+            .ok_or(AjoError::NotFound)?;
+
+        if circle.organizer != organizer {
+            return Err(AjoError::Unauthorized);
+        }
+
+        let status = Self::get_circle_status(env.clone());
+        if status == CircleStatus::Dissolved {
+            return Err(AjoError::CircleAlreadyDissolved);
+        }
+        if status == CircleStatus::Panicked {
+            return Err(AjoError::CirclePanicked);
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::CircleStatus, &CircleStatus::Panicked);
+
+        Ok(())
+    }
+
+    /// Emergency refund available to any member when the circle is in `Panicked` state.
+    /// Returns (total_contributed − total_withdrawn) to the caller with no penalty.
+    pub fn emergency_refund(env: Env, member: Address) -> Result<i128, AjoError> {
+        member.require_auth();
+
+        let status = Self::get_circle_status(env.clone());
+        if status != CircleStatus::Panicked {
+            return Err(AjoError::CircleNotActive);
+        }
+
+        let mut members: Map<Address, MemberData> = env
+            .storage()
+            .instance()
+            .get(&DataKey::Members)
+            .ok_or(AjoError::NotFound)?;
+
+        let mut member_data = members.get(member.clone()).ok_or(AjoError::NotFound)?;
+
+        let refund = member_data.total_contributed - member_data.total_withdrawn;
+        if refund <= 0 {
+            return Err(AjoError::InsufficientFunds);
+        }
+
+        member_data.total_withdrawn += refund;
+        member_data.status = 2; // Exited
+        members.set(member, member_data);
+        env.storage().instance().set(&DataKey::Members, &members);
+
+        Ok(refund)
+    }
+
+    /// Returns `true` when the circle is in emergency-halt state.
+    pub fn is_panicked(env: Env) -> bool {
+        Self::get_circle_status(env) == CircleStatus::Panicked
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use soroban_sdk::{testutils::Address as _, Address, Env};
+
+    // ── Helper ────────────────────────────────────────────────────────────────
+
+    /// Spin up a circle with the organizer + one extra member, each having
+    /// contributed `contribution` tokens.
+    fn setup_circle_with_member(
+        env: &Env,
+    ) -> (AjoCircleClient<'_>, Address, Address) {
+        let contract_id = env.register_contract(None, AjoCircle);
+        let client = AjoCircleClient::new(env, &contract_id);
+
+        let organizer = Address::generate(env);
+        let member = Address::generate(env);
+
+        client
+            .initialize_circle(&organizer, &100_i128, &7_u32, &12_u32, &5_u32);
+        client.add_member(&organizer, &member);
+        client.contribute(&organizer, &200_i128);
+        client.contribute(&member, &200_i128);
+
+        (client, organizer, member)
+    }
+
+    // ── Existing tests ────────────────────────────────────────────────────────
 
     #[test]
     fn enforce_member_limit_at_contract_level() {
@@ -610,5 +731,95 @@ mod tests {
 
         let third_join = client.add_member(&organizer, &member_three);
         assert_eq!(third_join, Err(AjoError::CircleAtCapacity));
+    }
+
+    // ── Panic-button tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_panic_happy_path() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, organizer, _member) = setup_circle_with_member(&env);
+
+        // Before panic, is_panicked returns false
+        assert!(!client.is_panicked());
+
+        // Organizer triggers panic
+        let result = client.panic(&organizer);
+        assert_eq!(result, Ok(()));
+
+        // Status is now Panicked
+        assert!(client.is_panicked());
+        assert_eq!(client.get_circle_status(), CircleStatus::Panicked);
+    }
+
+    #[test]
+    fn test_panic_only_organizer() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _organizer, member) = setup_circle_with_member(&env);
+
+        // A regular member cannot trigger panic
+        let result = client.panic(&member);
+        assert_eq!(result, Err(AjoError::Unauthorized));
+        assert!(!client.is_panicked());
+    }
+
+    #[test]
+    fn test_emergency_refund_during_panic() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, organizer, member) = setup_circle_with_member(&env);
+
+        // Trigger panic
+        client.panic(&organizer);
+
+        // Member claims emergency refund
+        let refund = client.emergency_refund(&member);
+        assert_eq!(refund, Ok(200_i128));
+
+        // Organizer claims emergency refund
+        let org_refund = client.emergency_refund(&organizer);
+        assert_eq!(org_refund, Ok(200_i128));
+
+        // Second refund attempt fails (already withdrawn)
+        let double = client.emergency_refund(&member);
+        assert_eq!(double, Err(AjoError::InsufficientFunds));
+    }
+
+    #[test]
+    fn test_emergency_refund_without_panic() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, _organizer, member) = setup_circle_with_member(&env);
+
+        // Refund should fail when circle is not panicked
+        let result = client.emergency_refund(&member);
+        assert_eq!(result, Err(AjoError::CircleNotActive));
+    }
+
+    #[test]
+    fn test_panic_blocks_contribute() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, organizer, member) = setup_circle_with_member(&env);
+
+        client.panic(&organizer);
+
+        let result = client.contribute(&member, &50_i128);
+        assert_eq!(result, Err(AjoError::CirclePanicked));
+    }
+
+    #[test]
+    fn test_panic_blocks_join() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (client, organizer, _member) = setup_circle_with_member(&env);
+
+        client.panic(&organizer);
+
+        let new_member = Address::generate(&env);
+        let result = client.add_member(&organizer, &new_member);
+        assert_eq!(result, Err(AjoError::CirclePanicked));
     }
 }
