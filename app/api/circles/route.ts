@@ -32,6 +32,7 @@ export async function GET(request: NextRequest) {
     }
 
     const skip = (page - 1) * limit;
+    const search = searchParams.get('search')?.trim();
 
     // Build where clause
     let where: any = {
@@ -39,6 +40,15 @@ export async function GET(request: NextRequest) {
         { organizerId: payload.userId },
         { members: { some: { userId: payload.userId } } },
       ],
+      ...(statusParam ? { status: statusParam as CircleStatus } : {}),
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search, mode: 'insensitive' as const } },
+              { description: { contains: search, mode: 'insensitive' as const } },
+            ],
+          }
+        : {}),
     };
     
     // Add status filter
