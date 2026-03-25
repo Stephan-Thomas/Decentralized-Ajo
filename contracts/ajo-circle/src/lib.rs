@@ -2,7 +2,7 @@
 
 pub mod factory;
 
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, token, Address, BytesN, Env, Map, Vec};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, Map, Vec};
 
 const MAX_MEMBERS: u32 = 50;
 const HARD_CAP: u32 = 100;
@@ -482,6 +482,12 @@ impl AjoCircle {
                 .set(&DataKey::RoundDeadline, &next_deadline);
         }
 
+        // Emit DepositReceived event
+        env.events().publish(
+            (symbol_short!("deposit"), member.clone()),
+            (amount, circle.current_round)
+        );
+
         Ok(())
     }
 
@@ -704,8 +710,14 @@ impl AjoCircle {
             member_data.has_received_payout = true;
             member_data.total_withdrawn += payout;
 
-            members.set(member, member_data);
+            members.set(member.clone(), member_data);
             env.storage().instance().set(&DataKey::Members, &members);
+
+            // Emit FundsWithdrawn event
+            env.events().publish(
+                (symbol_short!("withdraw"), member.clone()),
+                (payout, circle.current_round)
+            );
 
             Ok(payout)
         } else {
@@ -753,8 +765,14 @@ impl AjoCircle {
 
             member_data.total_withdrawn += amount;
 
-            members.set(member, member_data);
+            members.set(member.clone(), member_data);
             env.storage().instance().set(&DataKey::Members, &members);
+
+            // Emit FundsWithdrawn event for partial withdrawal
+            env.events().publish(
+                (symbol_short!("withdraw"), member.clone()),
+                (net_amount, circle.current_round)
+            );
 
             Ok(net_amount)
         } else {
@@ -975,8 +993,14 @@ impl AjoCircle {
 
         member_data.total_withdrawn += refund;
         member_data.status = 2; // Exited
-        members.set(member, member_data);
+        members.set(member.clone(), member_data);
         env.storage().instance().set(&DataKey::Members, &members);
+
+        // Emit FundsWithdrawn event for dissolution refund
+        env.events().publish(
+            (symbol_short!("withdraw"), member.clone()),
+            (refund, circle.current_round)
+        );
 
         Ok(refund)
     }
@@ -1055,8 +1079,14 @@ impl AjoCircle {
 
         member_data.total_withdrawn += refund;
         member_data.status = 2; // Exited
-        members.set(member, member_data);
+        members.set(member.clone(), member_data);
         env.storage().instance().set(&DataKey::Members, &members);
+
+        // Emit FundsWithdrawn event for emergency refund
+        env.events().publish(
+            (symbol_short!("withdraw"), member.clone()),
+            (refund, circle.current_round)
+        );
 
         Ok(refund)
     }
