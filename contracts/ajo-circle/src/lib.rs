@@ -105,7 +105,6 @@ impl AjoCircle {
         if stored_admin != *caller {
             return Err(AjoError::Unauthorized);
         }
-
         Ok(())
     }
 
@@ -121,6 +120,7 @@ impl AjoCircle {
     ) -> Result<(), AjoError> {
 
         organizer.require_auth();
+        let configured_max_members = if max_members == 0 { MAX_MEMBERS } else { max_members };
 
         env.storage().instance().set(&DataKey::Admin, &organizer);
 
@@ -169,13 +169,7 @@ impl AjoCircle {
         env.storage().instance().set(&DataKey::Members, &members);
 
         let mut standings: Map<Address, MemberStanding> = Map::new(&env);
-        standings.set(
-            organizer.clone(),
-            MemberStanding {
-                missed_count: 0,
-                is_active: true,
-            },
-        );
+        standings.set(organizer.clone(), MemberStanding { missed_count: 0, is_active: true });
         env.storage().instance().set(&DataKey::Standings, &standings);
 
         Ok(())
@@ -210,16 +204,13 @@ impl AjoCircle {
             return Err(AjoError::CircleAtCapacity);
         }
 
-        members.set(
-            new_member.clone(),
-            MemberData {
-                address: new_member.clone(),
-                total_contributed: 0,
-                total_withdrawn: 0,
-                has_received_payout: false,
-                status: 0,
-            },
-        );
+        members.set(new_member.clone(), MemberData {
+            address: new_member.clone(),
+            total_contributed: 0,
+            total_withdrawn: 0,
+            has_received_payout: false,
+            status: 0,
+        });
 
         circle.member_count += 1;
 
@@ -275,16 +266,9 @@ impl AjoCircle {
     ) -> Result<(), AjoError> {
 
         Self::require_admin(&env, &admin)?;
-
-        let mut kyc: Map<Address, bool> = env
-            .storage()
-            .instance()
-            .get(&DataKey::KycStatus)
-            .unwrap_or_else(|| Map::new(&env));
-
+        let mut kyc: Map<Address, bool> = env.storage().instance().get(&DataKey::KycStatus).unwrap_or_else(|| Map::new(&env));
         kyc.set(member, is_verified);
         env.storage().instance().set(&DataKey::KycStatus, &kyc);
-
         Ok(())
     }
 
