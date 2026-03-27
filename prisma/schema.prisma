@@ -14,6 +14,7 @@ model User {
   id        String   @id @default(cuid())
   email     String   @unique
   password  String
+  address   String   @unique
   
   // Wallet info
   walletAddress String? @unique
@@ -42,7 +43,21 @@ model User {
   withdrawals Withdrawal[]
   refreshTokens RefreshToken[]
   notifications Notification[]
+  ajos          UserAjo[]
   ajoParticipations UserAjoParticipation[]
+  settings      UserSettings?
+}
+
+model UserSettings {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailAddress       String?
+  receiveEmailNotifs Boolean  @default(true)
+  showPnlPublicly    Boolean  @default(false)
+  theme              String   @default("light")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 }
 
 model RefreshToken {
@@ -74,6 +89,7 @@ model Circle {
   contractDeployed Boolean @default(false)
   
   // Metadata
+  expectedEndDate DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -87,6 +103,7 @@ model Circle {
 
   @@index([organizerId])
   @@index([status])
+  @@index([organizerId, status])
 }
 
 enum CircleStatus {
@@ -94,6 +111,7 @@ enum CircleStatus {
   ACTIVE
   COMPLETED
   CANCELLED
+  ACTION_REQUIRED
 }
 
 model CircleMember {
@@ -118,6 +136,7 @@ model CircleMember {
   @@index([circleId])
   @@index([userId])
   @@index([status])
+  @@index([userId, status])
 }
 
 enum MemberStatus {
@@ -148,6 +167,7 @@ model Contribution {
   @@index([userId])
   @@index([status])
   @@index([circleId, status])
+  @@index([userId, status])
 }
 
 enum ContributionStatus {
@@ -277,6 +297,7 @@ model Withdrawal {
   @@index([userId])
   @@index([status])
   @@index([circleId, status])
+  @@index([userId, status])
 }
 
 enum WithdrawalStatus {
@@ -356,4 +377,26 @@ enum NotificationType {
   PROPOSAL_RESULT
   CIRCLE_DISSOLVED
   GENERAL
+}
+
+model AjoGroup {
+  id              String    @id @default(uuid())
+  contractAddress String    @unique
+  name            String
+  contributionAmt String    
+  cycleDuration   Int       
+  maxMembers      Int       
+  status          String    @default("OPEN")
+  members         UserAjo[]
+}
+
+model UserAjo {
+  userAddress String
+  ajoId       String
+  user        User      @relation(fields: [userAddress], references: [address], onDelete: Cascade)
+  ajo         AjoGroup  @relation(fields: [ajoId], references: [id], onDelete: Cascade)
+
+  @@id([userAddress, ajoId])
+  @@index([userAddress])
+  @@index([ajoId])
 }

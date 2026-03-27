@@ -29,7 +29,7 @@ export function createWagmiConfig() {
   })
 }
 
-const wagmiConfig = createWagmiConfig()
+export const wagmiConfig = createWagmiConfig()
 const queryClient = new QueryClient()
 
 interface Web3ProviderProps {

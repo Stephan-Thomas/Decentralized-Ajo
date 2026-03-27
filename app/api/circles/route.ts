@@ -1,3 +1,10 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { verifyToken, extractToken } from '@/lib/auth';
+import { applyRateLimit } from '@/lib/api-helpers';
+import { RATE_LIMITS } from '@/lib/rate-limit';
+import { CircleStatus } from '@prisma/client';
+
 // GET - List circles with pagination, filtering, and sorting
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
@@ -24,7 +31,6 @@ export async function GET(request: NextRequest) {
     const statusParam = searchParams.get('status')?.toUpperCase();
     const durationParam = searchParams.get('duration'); // Weekly, Monthly, Quarterly
     const sortBy = searchParams.get('sortBy') || 'newest'; // newest, size_desc, size_asc, name_asc, name_desc
-    const searchQuery = searchParams.get('search') || '';
 
     // Create cache key from query parameters
     const cacheParams = JSON.stringify({ page, limit, statusParam, durationParam, sortBy, searchQuery });
@@ -44,37 +50,45 @@ export async function GET(request: NextRequest) {
     }
 
     const skip = (page - 1) * limit;
-    const search = searchParams.get('search')?.trim();
+    const search = searchParams.get('search')?.trim() || '';
 
-    // Build optimized where clause using indexes
-    let where: any = {
-      OR: [
-        { organizerId: payload.userId },
-        { members: { some: { userId: payload.userId, status: 'ACTIVE' } } },
-      ],
-      ...(statusParam ? { status: statusParam as CircleStatus } : {}),
-      ...(search
-        ? {
-            OR: [
-              { name: { contains: search, mode: 'insensitive' as const } },
-              { description: { contains: search, mode: 'insensitive' as const } },
-            ],
-          }
-        : {}),
+    const durationDaysMap: Record<string, number> = {
+      Weekly: 7,
+      Monthly: 30,
+      Quarterly: 90,
     };
-    
-    // Add duration filter based on contributionFrequencyDays
-    if (durationParam) {
-      if (durationParam === 'Weekly') {
-        where.contributionFrequencyDays = 7;
-      } else if (durationParam === 'Monthly') {
-        where.contributionFrequencyDays = 30;
-      } else if (durationParam === 'Quarterly') {
-        where.contributionFrequencyDays = 90;
-      }
-    }
 
-    // Build optimized orderBy
+    // Build where clause — single source of truth, no duplicate filters
+    const where: any = {
+      AND: [
+        // User membership filter
+        {
+          OR: [
+            { organizerId: payload.userId },
+            { members: { some: { userId: payload.userId } } },
+          ],
+        },
+        // Status filter (uses @@index([organizerId, status]) and @@index([status]))
+        ...(statusParam ? [{ status: statusParam as CircleStatus }] : []),
+        // Duration filter
+        ...(durationParam && durationDaysMap[durationParam]
+          ? [{ contributionFrequencyDays: durationDaysMap[durationParam] }]
+          : []),
+        // Search filter — uses both name and description
+        ...(search
+          ? [
+              {
+                OR: [
+                  { name: { contains: search, mode: 'insensitive' as const } },
+                  { description: { contains: search, mode: 'insensitive' as const } },
+                ],
+              },
+            ]
+          : []),
+      ],
+    };
+
+    // Build orderBy
     let orderBy: any = {};
     if (sortBy === 'size_desc') {
       orderBy = { members: { _count: 'desc' } };
