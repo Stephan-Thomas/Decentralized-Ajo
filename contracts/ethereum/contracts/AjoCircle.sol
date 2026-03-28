@@ -100,6 +100,7 @@ contract AjoCircle is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradea
     uint256 public roundDeadline;
     uint256 public roundContribCount;
     uint256 public totalPool;
+    bool public circleFinished;
 
     // ═══════════════════════════════════════════════════════════════════════
     // QUERIES
@@ -150,6 +151,8 @@ contract AjoCircle is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradea
     event ContributionMade(address indexed member, uint256 amount);
     event DepositMade(address indexed member, uint256 amount, uint256 timestamp);
     event PayoutClaimed(address indexed member, uint256 amount);
+    event WithdrawCompleted(address indexed receiver, uint256 amount, uint256 cycle);
+    event CircleCompleted(uint256 totalCycles);
     event CircleDissolved();
     event PanicTriggered(address indexed admin);
 
@@ -166,6 +169,8 @@ contract AjoCircle is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradea
     error CircleNotActive();
     error CircleAtCapacity();
     error CirclePanicked();
+    error PoolThresholdNotMet();
+    error TransferFailed();
 
     // ═══════════════════════════════════════════════════════════════════════
     // MODIFIERS
@@ -347,6 +352,74 @@ contract AjoCircle is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradea
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // WITHDRAW (CYCLE-BASED NATIVE ETH PAYOUT)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// @notice Withdraw the pooled ETH for the current cycle.
+    /// @dev Implements Checks-Effects-Interactions to prevent reentrancy.
+    ///      The cycle receiver is determined by `members[currentCycle - 1]`
+    ///      (1-indexed cycle maps to 0-indexed memberAddresses array).
+    ///      Uses a low-level `.call` for the ETH transfer.
+    function withdraw() external onlyMember notPanicked nonReentrant {
+        // ── CHECKS ──────────────────────────────────────────────────────────
+
+        require(!circleFinished, "Ajo: Circle already finished");
+
+        CircleData memory _circle = circle;
+        uint256 _currentCycle = uint256(_circle.currentRound);
+
+        // Map cycle (1-indexed) to the 0-indexed memberAddresses array.
+        require(_currentCycle >= 1 && _currentCycle <= memberAddressesCount,
+            "Ajo: Invalid cycle index");
+
+        address expectedReceiver = memberAddresses[_currentCycle - 1];
+        require(msg.sender == expectedReceiver, "Ajo: Not your cycle turn");
+
+        MemberData storage member = members[msg.sender];
+        require(!member.hasReceivedPayout, "Ajo: Payout already claimed this rotation");
+
+        MemberStanding storage standing = standings[msg.sender];
+        require(standing.isActive, "Ajo: Member is not active");
+
+        // Pool must equal contributionAmount * memberCount before payout.
+        uint256 threshold = _circle.contributionAmount * uint256(_circle.memberCount);
+        require(totalPool >= threshold, "Ajo: Pool threshold not met");
+
+        uint256 amount = totalPool;
+
+        // ── EFFECTS ─────────────────────────────────────────────────────────
+
+        // Zero the pool and mark payout before the external call.
+        totalPool = 0;
+        member.hasReceivedPayout = true;
+        member.totalWithdrawn += amount;
+
+        // Advance the cycle.
+        uint256 nextCycle = _currentCycle + 1;
+
+        if (nextCycle > memberAddressesCount) {
+            // All members have received a payout — circle is complete.
+            circleFinished = true;
+            emit CircleCompleted(_currentCycle);
+        } else {
+            circle.currentRound = uint32(nextCycle);
+            // Reset payout flags so members can receive again in the next rotation.
+            for (uint256 i = 0; i < memberAddressesCount; i++) {
+                members[memberAddresses[i]].hasReceivedPayout = false;
+            }
+            // Re-mark the current receiver as paid so they can't double-claim.
+            member.hasReceivedPayout = true;
+        }
+
+        // ── INTERACTIONS ────────────────────────────────────────────────────
+
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "Ajo: ETH transfer failed");
+
+        emit WithdrawCompleted(msg.sender, amount, _currentCycle);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // HELPER FUNCTIONS
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -366,5 +439,10 @@ contract AjoCircle is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradea
 
         memberAddresses[memberAddressesCount] = _member;
         memberAddressesCount++;
+    }
+
+    /// @notice Accept native ETH contributions into the pool.
+    receive() external payable {
+        totalPool += msg.value;
     }
 }
