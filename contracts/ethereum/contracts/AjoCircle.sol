@@ -442,7 +442,12 @@ contract AjoCircle is Initializable, OwnableUpgradeable, ReentrancyGuardUpgradea
     }
 
     /// @notice Accept native ETH contributions into the pool.
+    /// @dev    Only members may send ETH directly; arbitrary senders are
+    ///         rejected to prevent pool inflation attacks where a non-member
+    ///         inflates `totalPool` past the threshold, triggering premature
+    ///         payouts or locking legitimate withdrawals.
     receive() external payable {
+        if (members[msg.sender].memberAddress == address(0)) revert NotFound();
         totalPool += msg.value;
     }
 }

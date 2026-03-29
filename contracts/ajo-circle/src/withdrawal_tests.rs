@@ -575,3 +575,120 @@ fn test_claim_payout_return_value_matches_calculation() {
     let member_data = client.get_member_balance(&organizer).unwrap();
     assert_eq!(member_data.total_withdrawn, expected_payout);
 }
+
+// ─── REENTRANCY / DOUBLE-CLAIM PROTECTION ─────────────────────────────────────
+
+/// Verifies that `has_received_payout` is set to `true` and persisted BEFORE
+/// the token transfer, so a second call in the same or a subsequent transaction
+/// is rejected with `AlreadyPaid`.
+#[test]
+fn test_claim_payout_double_claim_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, organizer, token_address, _admin) = setup_basic_circle(&env);
+    let contract_address = client.address.clone();
+
+    let token_admin = token::StellarAssetClient::new(&env, &token_address);
+    token_admin.mint(&contract_address, &1000_i128);
+
+    // First claim succeeds
+    let result1 = client.claim_payout(&organizer, &1_u32);
+    assert_eq!(result1, Ok(100_i128));
+
+    // Second claim for the same cycle must be rejected
+    let result2 = client.claim_payout(&organizer, &1_u32);
+    assert_eq!(result2, Err(AjoError::AlreadyPaid));
+}
+
+/// Verifies that the pool balance is decremented by the payout amount so that
+/// a second caller cannot drain funds that were already paid out.
+#[test]
+fn test_claim_payout_pool_decremented_after_payout() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, organizer, member1, _member2, token_address, _admin) =
+        setup_circle_with_members_and_funds(&env);
+
+    let pool_before = client.get_total_pool();
+    assert!(pool_before > 0, "pool should be funded after deposits");
+
+    client.claim_payout(&organizer, &1_u32).unwrap();
+
+    let pool_after = client.get_total_pool();
+    // Pool must have decreased by exactly the payout amount (3 * 100 = 300)
+    assert_eq!(pool_after, pool_before - 300_i128);
+}
+
+/// Verifies that rotation order is enforced: a member who is not the designated
+/// recipient for the given cycle is rejected with `Unauthorized`.
+#[test]
+fn test_claim_payout_rotation_order_enforced() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, organizer, member1, _member2, token_address, _admin) =
+        setup_circle_with_members_and_funds(&env);
+
+    // Set rotation order: member1 is slot 0 (cycle 1), organizer is slot 1 (cycle 2)
+    client.shuffle_rotation(&organizer).unwrap();
+
+    // Determine who is actually first in the rotation
+    let circle = client.get_circle_state().unwrap();
+    // We can't read RotationOrder directly, but we can verify that only the
+    // correct member succeeds for cycle 1 and the other is rejected.
+    // Try organizer for cycle 1 — one of them will succeed, the other fail.
+    let r1 = client.claim_payout(&organizer, &1_u32);
+    let r2 = client.claim_payout(&member1, &1_u32);
+
+    // Exactly one should succeed and one should fail with Unauthorized or AlreadyPaid
+    let successes = [&r1, &r2].iter().filter(|r| r.is_ok()).count();
+    let failures  = [&r1, &r2].iter().filter(|r| r.is_err()).count();
+    assert_eq!(successes, 1, "exactly one member should receive the cycle-1 payout");
+    assert_eq!(failures,  1, "the other member should be rejected");
+}
+
+/// Verifies that a disqualified member cannot claim a payout.
+#[test]
+fn test_claim_payout_disqualified_member_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, organizer, member1, _member2, token_address, _admin) =
+        setup_circle_with_members_and_funds(&env);
+
+    // Boot member1 (sets is_active = false)
+    client.boot_dormant_member(&organizer, &member1).unwrap();
+
+    let result = client.claim_payout(&member1, &1_u32);
+    assert_eq!(result, Err(AjoError::Disqualified));
+}
+
+/// Verifies that a paused (panicked) circle rejects payout claims.
+#[test]
+fn test_claim_payout_blocked_when_panicked() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, organizer, _member1, _member2, _token_address, _admin) =
+        setup_circle_with_members_and_funds(&env);
+
+    client.panic(&organizer).unwrap();
+
+    let result = client.claim_payout(&organizer, &1_u32);
+    assert_eq!(result, Err(AjoError::CirclePanicked));
+}
+
+/// Verifies that the pool must be sufficiently funded before a payout is allowed.
+#[test]
+fn test_claim_payout_insufficient_pool_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // Setup circle with NO deposits — pool is empty
+    let (client, organizer, token_address, _admin) = setup_basic_circle(&env);
+
+    let result = client.claim_payout(&organizer, &1_u32);
+    assert_eq!(result, Err(AjoError::InsufficientFunds));
+}

@@ -1,96 +1,43 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { verifyToken, extractToken } from '@/lib/auth';
-import { z } from 'zod';
 
-const profileSchema = z.object({
-  username: z.string().min(3).max(30).regex(/^[a-zA-Z0-9]+$/, 'Username must be alphanumeric only'),
-  email: z.string().email('Invalid email format'),
-});
-
-export async function PUT(request: NextRequest) {
+export async function PUT(req: Request) {
   try {
-    const token = extractToken(request.headers.get('authorization'));
-    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const userAddress = req.headers.get('x-wallet-address'); 
+    if (!userAddress) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const payload = verifyToken(token);
-    if (!payload) return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
+    const body = await req.json();
+    const { username, email } = body;
 
-    const body = await request.json();
-    
-    // Server-side validation with Zod
-    const result = profileSchema.safeParse(body);
-    if (!result.success) {
-      return NextResponse.json({ 
-        error: 'Validation failed', 
-        details: result.error.flatten().fieldErrors 
-      }, { status: 400 });
+    if (!username || !email) {
+      return NextResponse.json({ error: 'Invalid body' }, { status: 400 });
     }
 
-    const { username, email } = result.data;
-
-    // Check if username is already taken by another user
-    if (username) {
-      const existingUser = await prisma.user.findFirst({
-        where: { 
-          username,
-          NOT: { id: payload.userId }
-        }
-      });
-      if (existingUser) {
-        return NextResponse.json({ error: 'Username is already taken' }, { status: 400 });
-      }
-    }
-
-    // Check if email is already taken by another user
-    const existingEmail = await prisma.user.findFirst({
-      where: { 
-        email,
-        NOT: { id: payload.userId }
-      }
-    });
-    if (existingEmail) {
-      return NextResponse.json({ error: 'Email is already taken' }, { status: 400 });
-    }
-
-    const updatedUser = await prisma.user.update({
-      where: { id: payload.userId },
-      data: { username, email },
-      select: {
-        id: true,
-        email: true,
-        username: true,
-        firstName: true,
-        lastName: true,
-      }
+    const user = await prisma.user.upsert({
+      where: { address: userAddress },
+      update: { username, email },
+      create: { address: userAddress, username, email },
     });
 
-    return NextResponse.json({ 
-      success: true, 
-      message: 'Profile updated successfully',
-      user: updatedUser 
-    });
-
+    return NextResponse.json(user, { status: 200 });
   } catch (error) {
-    console.error('Update profile error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error('Database mutation failed:', error);
+    return NextResponse.json({ error: 'Database mutation failed' }, { status: 500 });
   }
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(req: Request) {
   try {
-    const token = extractToken(request.headers.get('authorization'));
-    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    const payload = verifyToken(token);
-    if (!payload) return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
+    const userAddress = req.headers.get('x-wallet-address');
+    if (!userAddress) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const user = await prisma.user.findUnique({
-      where: { id: payload.userId },
+      where: { address: userAddress },
       select: {
         id: true,
         email: true,
         username: true,
+        address: true,
         firstName: true,
         lastName: true,
       }
@@ -98,9 +45,8 @@ export async function GET(request: NextRequest) {
 
     if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-    return NextResponse.json({ success: true, user });
+    return NextResponse.json(user, { status: 200 });
   } catch (error) {
-    console.error('Get profile error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

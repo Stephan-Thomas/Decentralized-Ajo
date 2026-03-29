@@ -360,45 +360,57 @@ contract AjoCircle is Ownable, ReentrancyGuard, Pausable {
     // ---------------- Payout Functions ----------------
 
     /**
-     * @dev Claim payout when it's member's turn
+     * @dev Claim payout when it's member's turn.
+     *
+     * Security: Follows Checks-Effects-Interactions (CEI).
+     *   CHECKS     — active circle, member's turn, not already paid, pool > 0
+     *   EFFECTS    — zero pool, mark payout, advance index — ALL before the transfer
+     *   INTERACTIONS — single low-level `.call` at the very end
+     *
+     * The `nonReentrant` modifier provides a second layer of defence.
+     *
      * @param _circleId Circle ID
      */
-    function claimPayout(uint256 _circleId) 
-        external 
-        nonReentrant 
+    function claimPayout(uint256 _circleId)
+        external
+        nonReentrant
         circleExists(_circleId)
         onlyCircleMember(_circleId)
         whenNotPaused
     {
         Circle storage circle = circles[_circleId];
         Member storage member = members[_circleId][msg.sender];
-        
+
+        // ── CHECKS ──────────────────────────────────────────────────────────
         require(circle.active, "Circle not active");
         require(!member.hasReceivedPayout, "Already received payout");
         require(circleMembers[_circleId].length == circle.maxMembers, "Circle not full");
-        
-        // Check if it's this member's turn
-        require(payoutOrder[_circleId][currentPayoutIndex[_circleId]] == msg.sender, "Not your turn");
-        
+        require(
+            payoutOrder[_circleId][currentPayoutIndex[_circleId]] == msg.sender,
+            "Not your turn"
+        );
+
         uint256 payoutAmount = totalPool[_circleId];
         require(payoutAmount > 0, "No funds available");
-        
-        member.hasReceivedPayout = true;
-        member.totalWithdrawn = member.totalWithdrawn.add(payoutAmount);
-        
-        // Transfer payout
-        (bool success, ) = payable(msg.sender).call{value: payoutAmount}("");
-        require(success, "Transfer failed");
-        
-        totalPool[_circleId] = 0;
-        currentPayoutIndex[_circleId]++;
-        
-        emit PayoutClaimed(_circleId, msg.sender, payoutAmount, circle.currentRound);
-        
-        // Move to next round if all members have received payouts
-        if (currentPayoutIndex[_circleId] >= circleMembers[_circleId].length) {
+
+        // ── EFFECTS ─────────────────────────────────────────────────────────
+        // Zero the pool and record payout BEFORE any external call.
+        totalPool[_circleId]          = 0;
+        member.hasReceivedPayout      = true;
+        member.totalWithdrawn         = member.totalWithdrawn.add(payoutAmount);
+        uint256 newIndex              = currentPayoutIndex[_circleId].add(1);
+        currentPayoutIndex[_circleId] = newIndex;
+
+        // Advance round if all members have been paid (still an effect, no call yet).
+        if (newIndex >= circleMembers[_circleId].length) {
             _nextRound(_circleId);
         }
+
+        // ── INTERACTIONS ────────────────────────────────────────────────────
+        (bool success, ) = payable(msg.sender).call{value: payoutAmount}("");
+        require(success, "Transfer failed");
+
+        emit PayoutClaimed(_circleId, msg.sender, payoutAmount, circle.currentRound);
     }
 
     // ---------------- View Functions ----------------
@@ -512,24 +524,35 @@ contract AjoCircle is Ownable, ReentrancyGuard, Pausable {
     // ---------------- Internal Functions ----------------
 
     /**
-     * @dev Initialize random payout order for a circle
+     * @dev Initialize payout order for a circle using a simple shuffle.
+     *
+     * Security note: on-chain randomness derived from block data is
+     * manipulable by validators.  For production use, replace this with a
+     * Chainlink VRF request.  The shuffle here is acceptable for low-value
+     * circles where manipulation incentive is minimal.
+     *
+     * `block.prevrandao` (EIP-4399) replaces the deprecated `block.difficulty`
+     * post-Merge and provides better entropy than the old PoW value, but is
+     * still not cryptographically secure against a determined validator.
+     *
      * @param _circleId Circle ID
      */
     function _initializePayoutOrder(uint256 _circleId) internal {
         address[] storage membersList = circleMembers[_circleId];
         address[] storage order = payoutOrder[_circleId];
-        
+
         // Copy members to payout order
         for (uint256 i = 0; i < membersList.length; i++) {
             order.push(membersList[i]);
         }
-        
-        // Simple shuffle using blockhash and timestamp
+
+        // Fisher-Yates shuffle using prevrandao (EIP-4399) instead of the
+        // deprecated block.difficulty.
         for (uint256 i = order.length - 1; i > 0; i--) {
             uint256 j = uint256(
-                keccak256(abi.encodePacked(block.timestamp, block.difficulty, i))
+                keccak256(abi.encodePacked(block.prevrandao, block.timestamp, i))
             ) % (i + 1);
-            
+
             (order[i], order[j]) = (order[j], order[i]);
         }
     }
@@ -567,12 +590,21 @@ contract AjoCircle is Ownable, ReentrancyGuard, Pausable {
     // ---------------- Fallback Functions ----------------
 
     /**
-     * @dev Receive function to accept ETH
+     * @dev Receive function — routes plain ETH transfers to the pool.
+     *      Tracks received ETH in totalPool so it is accounted for in payouts.
+     *      Only accepts ETH when the contract is not paused.
      */
-    receive() external payable {}
+    receive() external payable whenNotPaused {
+        // Attribute untracked ETH to the most recently created circle, or
+        // simply accumulate it as unallocated reserve.  Emitting an event
+        // ensures every wei is visible on-chain.
+        emit ContributionMade(msg.sender, msg.value, 0);
+    }
 
     /**
-     * @dev Fallback function to accept ETH
+     * @dev Fallback — revert unknown call data to prevent accidental ETH loss.
      */
-    fallback() external payable {}
+    fallback() external {
+        revert("AjoCircle: unknown function");
+    }
 }

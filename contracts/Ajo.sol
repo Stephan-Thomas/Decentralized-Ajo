@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-/**
- * @title Ajo
- * @dev The foundational smart contract establishing an Ajo pool containing members, cycle duration, and deposit targets.
- */
 contract Ajo {
-    /// @notice The amount each member must contribute in each cycle
+    address public admin;
     uint256 public contributionAmount;
+    uint32 public currentCycle;
+    uint32 public maxMembers;
 
-    /// @notice The duration of each cycle in seconds
-    uint256 public cycleDuration;
+    address[] public members;
 
     /// @notice The maximum number of members allowed in the pool
     uint256 public maxMembers;
@@ -75,5 +72,10 @@ contract Ajo {
         totalPool += msg.value;
 
         emit Deposited(msg.sender, msg.value);
+    constructor(uint256 _amount, uint32 _maxMembers) {
+        admin = msg.sender;
+        contributionAmount = _amount;
+        maxMembers = _maxMembers;
+        currentCycle = 1;
     }
 }

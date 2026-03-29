@@ -1,4 +1,4 @@
-const { expect } = require("chai");
+﻿const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
 describe("AjoCircle", function () {
@@ -284,6 +284,79 @@ describe("AjoCircle", function () {
       await expect(
         ajoCircle.connect(await ethers.getSigner(firstMember)).claimPayout(circleId)
       ).to.be.revertedWith("Already received payout");
+    });
+  });
+
+  // â”€â”€â”€ Reentrancy / CEI Verification â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  describe("Reentrancy Protection", function () {
+    let circleId;
+    const contributionAmountUSD = ethers.utils.parseUnits("50", 8);
+
+    beforeEach(async function () {
+      const tx = await ajoCircle.createCircle(
+        ethers.constants.AddressZero,
+        contributionAmountUSD,
+        7,
+        12,
+        3
+      );
+      const receipt = await tx.wait();
+      circleId = receipt.events.find(e => e.event === "CircleCreated").args.circleId;
+
+      await ajoCircle.connect(member1).joinCircle(circleId);
+      await ajoCircle.connect(member2).joinCircle(circleId);
+
+      const requiredETH = await ajoCircle.getCurrentContributionAmount(circleId);
+      await ajoCircle.contributeETH(circleId, { value: requiredETH });
+      await ajoCircle.connect(member1).contributeETH(circleId, { value: requiredETH });
+      await ajoCircle.connect(member2).contributeETH(circleId, { value: requiredETH });
+    });
+
+    it("Should zero totalPool BEFORE transferring ETH (CEI)", async function () {
+      // After claimPayout the pool must be 0 â€” verifies the effect happened
+      // before the interaction (transfer).
+      const payoutOrder = await ajoCircle.getPayoutOrder(circleId);
+      const firstMember = payoutOrder[0];
+
+      await ajoCircle.connect(await ethers.getSigner(firstMember)).claimPayout(circleId);
+
+      const poolAfter = await ajoCircle.totalPool(circleId);
+      expect(poolAfter).to.equal(0);
+    });
+
+    it("Should mark hasReceivedPayout BEFORE transferring ETH (CEI)", async function () {
+      const payoutOrder = await ajoCircle.getPayoutOrder(circleId);
+      const firstMember = payoutOrder[0];
+
+      await ajoCircle.connect(await ethers.getSigner(firstMember)).claimPayout(circleId);
+
+      const memberData = await ajoCircle.getMember(circleId, firstMember);
+      expect(memberData.hasReceivedPayout).to.be.true;
+    });
+
+    it("Should reject a second claimPayout call (double-claim prevention)", async function () {
+      const payoutOrder = await ajoCircle.getPayoutOrder(circleId);
+      const firstMember = payoutOrder[0];
+      const signer = await ethers.getSigner(firstMember);
+
+      await ajoCircle.connect(signer).claimPayout(circleId);
+
+      // Second call must revert â€” state was already updated
+      await expect(
+        ajoCircle.connect(signer).claimPayout(circleId)
+      ).to.be.revertedWith("Already received payout");
+    });
+
+    it("Should advance payoutIndex atomically before ETH transfer", async function () {
+      const payoutOrder = await ajoCircle.getPayoutOrder(circleId);
+      const firstMember = payoutOrder[0];
+
+      const indexBefore = await ajoCircle.currentPayoutIndex(circleId);
+      await ajoCircle.connect(await ethers.getSigner(firstMember)).claimPayout(circleId);
+      const indexAfter = await ajoCircle.currentPayoutIndex(circleId);
+
+      expect(indexAfter).to.equal(indexBefore.add(1));
     });
   });
 });

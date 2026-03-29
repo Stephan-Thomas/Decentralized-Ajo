@@ -13,6 +13,7 @@
     "lint": "eslint .",
     "test": "npm run test:contracts && npm run test:unit",
     "test:unit": "jest --runInBand",
+    "test:api": "jest --runInBand --selectProjects api",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
