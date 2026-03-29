@@ -11,6 +11,30 @@ const CreateAjoSchema = z.object({
   txHash: z.string().min(10, 'Invalid transaction hash'),
 });
 
+export async function GET(request: NextRequest) {
+  const token = extractToken(request.headers.get('authorization'));
+  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const payload = verifyToken(token);
+  if (!payload) return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+
+  try {
+    const ajos = await prisma.circle.findMany({
+      where: {
+        OR: [
+          { organizerId: payload.userId },
+          { members: { some: { userId: payload.userId } } }
+        ]
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    return NextResponse.json(ajos, { status: 200 });
+  } catch (error) {
+    console.error('List Ajos error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
 export async function POST(request: NextRequest) {
   const token = extractToken(request.headers.get('authorization'));
   if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
