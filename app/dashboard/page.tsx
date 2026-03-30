@@ -12,8 +12,10 @@ import { authenticatedFetch } from '@/lib/auth-client';
 import { useWallet } from '@/lib/wallet-context';
 import { Dashboard } from '@/components/dashboard';
 import { DashboardStats } from '@/components/dashboard/dashboard-stats';
+import { DashboardStatsSkeleton } from '@/components/dashboard/stats-skeleton';
 import { CircleList } from '@/components/dashboard/circle-list';
 import DashboardCard from '@/components/DashboardCard';
+import DashboardSkeleton from '@/components/dashboard-skeleton';
 import {
   Pagination,
   PaginationContent,
@@ -168,9 +170,7 @@ export default function DashboardPage() {
           </div>
 
           {ajosLoading ? (
-            <div className="text-center py-12 text-muted-foreground">
-              Loading your Ajos...
-            </div>
+            <DashboardSkeleton />
           ) : userAjos.length === 0 ? (
             <div className="text-center py-12 border-2 border-dashed rounded-lg">
               <p className="text-muted-foreground mb-4">
@@ -357,7 +357,7 @@ export default function DashboardPage() {
 
       <div className="container mx-auto px-4 py-10 space-y-8">
         {/* Stats row */}
-        <DashboardStats />
+        {loading ? <DashboardStatsSkeleton /> : <DashboardStats />}
 
         {/* Circle browser */}
         <div className="space-y-4">

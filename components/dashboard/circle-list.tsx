@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { CircleDot, ArrowRight, Wallet, Users, LayoutGrid } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { CircleListSkeleton } from './circle-list-skeleton';
 
 interface Circle {
   id: string;
@@ -19,13 +20,7 @@ interface CircleListProps {
 
 export function CircleList({ circles, loading }: CircleListProps) {
   if (loading) {
-    return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {[1, 2, 3].map((i) => (
-          <Card key={i} className="h-64 animate-pulse bg-muted/50" />
-        ))}
-      </div>
-    );
+    return <CircleListSkeleton />;
   }
 
   if (circles.length === 0) {

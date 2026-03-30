@@ -11,6 +11,15 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CircleList } from '@/components/dashboard/circle-list';
 import { authenticatedFetch } from '@/lib/auth-client';
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationPrevious,
+  PaginationNext,
+  PaginationEllipsis,
+} from '@/components/ui/pagination';
 
 
 interface Circle {
@@ -38,6 +47,8 @@ export default function Home() {
   const [durationFilter, setDurationFilter] = useState(searchParams.get('duration') || 'ALL');
   const [sortBy, setSortBy] = useState(searchParams.get('sortBy') || 'newest');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(searchQuery);
+  const [currentPage, setCurrentPage] = useState(Number(searchParams.get('page')) || 1);
+  const [totalPages, setTotalPages] = useState(1);
 
   // Debounce search
   useEffect(() => {
@@ -54,14 +65,20 @@ export default function Home() {
     if (statusFilter !== 'ALL') params.set('status', statusFilter);
     if (durationFilter !== 'ALL') params.set('duration', durationFilter);
     if (sortBy !== 'newest') params.set('sortBy', sortBy);
+    if (currentPage > 1) params.set('page', String(currentPage));
     
     const newUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`;
     router.replace(newUrl, { scroll: false });
-  }, [searchQuery, statusFilter, durationFilter, sortBy, router]);
+  }, [searchQuery, statusFilter, durationFilter, sortBy, currentPage, router]);
 
   useEffect(() => {
     updateURLParams();
   }, [updateURLParams]);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearchQuery, statusFilter, durationFilter, sortBy]);
 
   // Clear all filters
   const clearAllFilters = () => {
@@ -69,6 +86,7 @@ export default function Home() {
     setStatusFilter('ALL');
     setDurationFilter('ALL');
     setSortBy('newest');
+    setCurrentPage(1);
   };
 
   // Remove single filter
@@ -103,11 +121,13 @@ export default function Home() {
       if (statusFilter !== 'ALL') params.set('status', statusFilter);
       if (durationFilter !== 'ALL') params.set('duration', durationFilter);
       if (sortBy) params.set('sortBy', sortBy);
-      
+      params.set('page', String(currentPage));
+
       const response = await authenticatedFetch(`/api/circles?${params.toString()}`);
       if (response.ok) {
         const data = await response.json();
         setCircles(data.data || []);
+        setTotalPages(data.meta?.pages ?? 1);
       }
     } catch (error) {
       console.error('Error fetching circles:', error);
@@ -120,7 +140,7 @@ export default function Home() {
     if (isAuthenticated) {
       fetchCircles();
     }
-  }, [debouncedSearchQuery, statusFilter, durationFilter, sortBy, isAuthenticated]);
+  }, [debouncedSearchQuery, statusFilter, durationFilter, sortBy, currentPage, isAuthenticated]);
 
   if (!isAuthenticated) {
     return <LandingPage />;
@@ -298,6 +318,46 @@ export default function Home() {
         </div>
 
         <CircleList circles={circles} loading={loading} />
+
+        {totalPages > 1 && (
+          <Pagination className="mt-8">
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious
+                  href="#"
+                  aria-disabled={currentPage <= 1}
+                  className={currentPage <= 1 ? 'pointer-events-none opacity-50' : ''}
+                  onClick={(e) => { e.preventDefault(); if (currentPage > 1) setCurrentPage(p => p - 1); }}
+                />
+              </PaginationItem>
+
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) =>
+                Math.abs(p - currentPage) <= 2 || p === 1 || p === totalPages ? (
+                  <PaginationItem key={p}>
+                    <PaginationLink
+                      href="#"
+                      isActive={p === currentPage}
+                      onClick={(e) => { e.preventDefault(); setCurrentPage(p); }}
+                    >
+                      {p}
+                    </PaginationLink>
+                  </PaginationItem>
+                ) : (p === currentPage - 3 || p === currentPage + 3) ? (
+                  <PaginationItem key={p}><PaginationEllipsis /></PaginationItem>
+                ) : null
+              )}
+
+              <PaginationItem>
+                <PaginationNext
+                  href="#"
+                  aria-disabled={currentPage >= totalPages}
+                  className={currentPage >= totalPages ? 'pointer-events-none opacity-50' : ''}
+                  onClick={(e) => { e.preventDefault(); if (currentPage < totalPages) setCurrentPage(p => p + 1); }}
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
+        )}
       </div>
     </main>
   );

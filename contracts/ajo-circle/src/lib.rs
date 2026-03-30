@@ -143,6 +143,13 @@ pub struct MemberStanding {
 }
 
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeConfig {
+    pub treasury: Address,
+    pub fee_bps: u32,
+}
+
+#[contracttype]
 pub enum DataKey {
     Circle,
     Members,
@@ -855,6 +862,11 @@ impl AjoCircle {
 
     pub fn get_circle_state(env: Env) -> Result<CircleData, AjoError> {
         env.storage().instance().get(&DataKey::Circle).ok_or(AjoError::NotFound)
+    }
+
+    /// Get current fee configuration
+    pub fn get_fee_config(env: Env) -> Option<FeeConfig> {
+        env.storage().instance().get(&DataKey::FeeConfig)
     }
 }
 Â  Â  /// Calculate 10^exp with overflow checking
