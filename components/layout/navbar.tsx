@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { CircleDot, Menu, X, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { WalletButton } from "@/components/wallet-button";
+import { ConnectButton } from "@rainbow-me/rainbowkit"; // <-- replaced WalletButton
 import { ThemeToggle } from "@/components/theme-toggle";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import {
@@ -173,7 +173,7 @@ export function Navbar() {
             <NotificationBell />
             <ThemeToggle />
             <div className="hidden sm:block">
-              <WalletButton />
+              <ConnectButton /> {/* <-- replaced WalletButton */}
             </div>
 
             {/* Hamburger — mobile only */}
@@ -235,7 +235,7 @@ export function Navbar() {
 
             {/* Mobile Wallet Button */}
             <div className="mt-6 pt-4 border-t sm:hidden">
-              <WalletButton />
+              <ConnectButton /> {/* <-- replaced WalletButton */}
             </div>
           </div>
         </div>
