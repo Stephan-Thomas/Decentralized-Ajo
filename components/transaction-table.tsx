@@ -15,6 +15,10 @@ export interface Transaction {
   status: string;
   createdAt: string;
   circle: { id: string; name: string };
+  /** On-chain Stellar transaction hash (64-char hex). Optional — may be absent for legacy rows. */
+  txHash?: string;
+  /** On-chain Soroban contract ID. Optional. */
+  contractId?: string;
 }
 
 const statusVariant: Record<string, 'default' | 'secondary' | 'destructive'> = {
@@ -40,10 +44,10 @@ export function TransactionTable({ transactions, onSort, sortBy, order }: Transa
           <TableHeader>
             <TableRow>
               <TableHead>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="-ml-3" 
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="-ml-3"
                   onClick={() => onSort?.('createdAt')}
                 >
                   Date {sortBy === 'createdAt' && <ArrowUpDown className="ml-1 h-3 w-3" />}
@@ -53,14 +57,15 @@ export function TransactionTable({ transactions, onSort, sortBy, order }: Transa
               <TableHead>Round</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => onSort?.('amount')}
                 >
                   Amount {sortBy === 'amount' && <ArrowUpDown className="ml-1 h-3 w-3" />}
                 </Button>
               </TableHead>
+              <TableHead>Tx Hash</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -83,26 +88,29 @@ export function TransactionTable({ transactions, onSort, sortBy, order }: Transa
                 <TableCell className="text-right font-mono text-sm">
                   {formatAmount(tx.amount)} XLM
                 </TableCell>
+                <TableCell>
+                  {tx.txHash ? (
+                    <ExplorerLink
+                      hash={tx.txHash}
+                      type="tx"
+                      showLab
+                    />
+                  ) : (
+                    <span className="text-xs text-muted-foreground">—</span>
+                  )}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       </div>
 
-      {/* Mobile View: stacked rows that become grid on md+ */}
+      {/* Mobile View: stacked cards */}
       <div className="space-y-3 md:hidden">
-        <div className="hidden md:grid grid-cols-5 font-bold border-b pb-2">
-          <span>Date</span>
-          <span>Amount</span>
-          <span>Circle</span>
-          <span>Status</span>
-          <span>Transaction</span>
-        </div>
-
         {transactions.map((tx) => (
           <div
             key={tx.id}
-            className="flex flex-col md:grid md:grid-cols-5 p-3 md:p-0 border rounded md:border-none shadow-sm md:shadow-none"
+            className="flex flex-col p-3 border rounded shadow-sm gap-1.5"
           >
             <span className="text-sm text-muted-foreground md:text-black">
               {new Date(tx.createdAt).toLocaleDateString()}
@@ -117,10 +125,32 @@ export function TransactionTable({ transactions, onSort, sortBy, order }: Transa
               <Badge variant={statusVariant[tx.status] ?? 'secondary'} className="h-fit py-0.5 px-2">
                 {tx.status}
               </Badge>
-            </span>
-            <span className="text-sm truncate font-mono" title={tx.id}>
-              {tx.id}
-            </span>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <span className="text-blue-600">
+                <Link href={`/circles/${tx.circle.id}`} className="hover:underline">
+                  {tx.circle.name}
+                </Link>
+              </span>
+              <span className="font-semibold">{tx.amount.toFixed(2)} XLM</span>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 pt-1 border-t">
+              <span className="text-xs text-muted-foreground whitespace-nowrap">Tx Hash</span>
+              {tx.txHash ? (
+                <ExplorerLink
+                  hash={tx.txHash}
+                  type="tx"
+                  showLab
+                  truncateChars={5}
+                />
+              ) : (
+                <span className="text-xs text-muted-foreground font-mono" title={tx.id}>
+                  {tx.id.slice(0, 10)}…
+                </span>
+              )}
+            </div>
           </div>
         ))}
       </div>
@@ -136,10 +166,10 @@ export function TransactionCard({ transaction }: { transaction: Transaction }) {
       <div className="flex items-start justify-between">
         <div className="space-y-1">
           <p className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">
-            {new Date(transaction.createdAt).toLocaleDateString(undefined, { 
-              year: 'numeric', 
-              month: 'short', 
-              day: 'numeric' 
+            {new Date(transaction.createdAt).toLocaleDateString(undefined, {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric',
             })}
           </p>
           <p className="text-xl font-bold tracking-tight">
@@ -164,17 +194,37 @@ export function TransactionCard({ transaction }: { transaction: Transaction }) {
             <span className="font-medium">#{transaction.round}</span>
           </div>
           <div className="flex justify-between items-center gap-2">
-            <span className="text-muted-foreground whitespace-nowrap">Transaction ID</span>
-            <span className="font-mono text-[10px] text-muted-foreground truncate max-w-[120px]" title={transaction.id}>
-              {transaction.id}
-            </span>
+            <span className="text-muted-foreground whitespace-nowrap">Tx Hash</span>
+            {transaction.txHash ? (
+              <ExplorerLink
+                hash={transaction.txHash}
+                type="tx"
+                showLab
+                truncateChars={5}
+              />
+            ) : (
+              <span className="font-mono text-[10px] text-muted-foreground truncate max-w-[140px]" title={transaction.id}>
+                {transaction.id}
+              </span>
+            )}
           </div>
+          {transaction.contractId && (
+            <div className="flex justify-between items-center gap-2">
+              <span className="text-muted-foreground whitespace-nowrap">Contract</span>
+              <ExplorerLink
+                hash={transaction.contractId}
+                type="contract"
+                showLab
+                truncateChars={5}
+              />
+            </div>
+          )}
         </div>
       ) : null}
 
-      <Button 
-        variant="ghost" 
-        size="sm" 
+      <Button
+        variant="ghost"
+        size="sm"
         className="w-full text-muted-foreground hover:text-foreground h-8 flex items-center justify-center gap-1 group transition-colors"
         onClick={() => setIsExpanded(!isExpanded)}
       >
@@ -187,4 +237,3 @@ export function TransactionCard({ transaction }: { transaction: Transaction }) {
     </div>
   );
 }
-
