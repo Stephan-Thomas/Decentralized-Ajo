@@ -8,7 +8,7 @@ import {
   getRefreshTokenExpiryDate,
   isSecureCookieEnvironment,
 } from '@/lib/auth';
-import { validateBody, applyRateLimit } from '@/lib/api-helpers';
+import { validateBody, applyRateLimit, errorResponse } from '@/lib/api-helpers';
 import { LoginSchema } from '@/lib/validations/auth';
 import { RATE_LIMITS } from '@/lib/rate-limit';
 import { createChildLogger } from '@/lib/logger';
@@ -30,12 +30,12 @@ export async function POST(request: NextRequest) {
     });
 
     if (!user) {
-      return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 });
+      return errorResponse(request, { code: 'invalid_credentials', message: 'Invalid email or password' }, 401);
     }
 
     const isValidPassword = await verifyPassword(password, user.password);
     if (!isValidPassword) {
-      return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 });
+      return errorResponse(request, { code: 'invalid_credentials', message: 'Invalid email or password' }, 401);
     }
 
     const token = generateToken({
@@ -73,6 +73,6 @@ export async function POST(request: NextRequest) {
     return response;
   } catch (err) {
     logger.error('Login error', { err });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return errorResponse(request, { code: 'internal_error', message: 'Internal server error' }, 500);
   }
 }

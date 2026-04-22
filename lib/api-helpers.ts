@@ -2,6 +2,26 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ZodSchema, ZodError } from 'zod';
 import { checkRateLimit, getRateLimitKey, RateLimitConfig } from './rate-limit';
 
+export type ErrorEnvelope = {
+  code: string;
+  message?: string;
+  details?: unknown;
+  requestId?: string | null;
+};
+
+/** Build a standardized error response and attach `x-request-id` header when available. */
+export function errorResponse(
+  request: NextRequest | null,
+  { code, message, details }: { code: string; message: string; details?: unknown },
+  status = 500,
+) {
+  const requestId = request?.headers.get('x-request-id') ?? null;
+  const payload: ErrorEnvelope = { code, message, details, requestId };
+  const res = NextResponse.json(payload, { status });
+  if (requestId) res.headers.set('x-request-id', requestId);
+  return res;
+}
+
 /** Parse and validate a request body against a Zod schema. */
 export async function validateBody<T>(
   request: NextRequest,
@@ -13,7 +33,7 @@ export async function validateBody<T>(
   } catch {
     return {
       data: null,
-      error: NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }),
+      error: errorResponse(request, { code: 'invalid_json', message: 'Invalid JSON body' }, 400),
     };
   }
 
@@ -21,9 +41,10 @@ export async function validateBody<T>(
   if (!result.success) {
     return {
       data: null,
-      error: NextResponse.json(
-        { error: 'Validation failed', details: result.error.flatten() },
-        { status: 400 },
+      error: errorResponse(
+        request,
+        { code: 'validation_failed', message: 'Validation failed', details: result.error.flatten() },
+        400,
       ),
     };
   }
@@ -50,13 +71,16 @@ export function applyRateLimit(
   const limited = checkRateLimit(key, config);
 
   if (limited) {
-    return NextResponse.json(
+    const res = NextResponse.json(
       { error: 'Too many requests, please try again later.' },
       {
         status: 429,
         headers: { 'Retry-After': String(limited.retryAfter) },
       },
     );
+    const requestId = request.headers.get('x-request-id');
+    if (requestId) res.headers.set('x-request-id', requestId);
+    return res;
   }
 
   return null;

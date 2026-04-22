@@ -23,10 +23,9 @@ export function middleware(request: NextRequest) {
   // Only run origin check when an Origin header is present (i.e. cross-origin
   // browser requests). Server-to-server calls without Origin are unaffected.
   if (origin && !allowedOrigins.has(origin)) {
-    return NextResponse.json(
-      { error: 'Origin not allowed' },
-      { status: 403 },
-    );
+    const res = NextResponse.json({ error: 'Origin not allowed' }, { status: 403 });
+    res.headers.set('x-request-id', requestId);
+    return res;
   }
 
   // Handle preflight (OPTIONS) immediately — no further processing needed.
@@ -37,6 +36,7 @@ export function middleware(request: NextRequest) {
     preflight.headers.set('Access-Control-Allow-Headers', ALLOWED_HEADERS);
     preflight.headers.set('Access-Control-Allow-Credentials', 'true');
     preflight.headers.set('Access-Control-Max-Age', '86400');
+    preflight.headers.set('x-request-id', requestId);
     return preflight;
   }
 
@@ -61,19 +61,20 @@ export function middleware(request: NextRequest) {
         ip,
         retryAfter: limitResult.retryAfter 
       }));
-
-      return NextResponse.json(
-        { 
+      const res = NextResponse.json(
+        {
           error: 'Too many requests; please try again later.',
-          retryAfter: limitResult.retryAfter
+          retryAfter: limitResult.retryAfter,
         },
-        { 
+        {
           status: 429,
           headers: {
             'Retry-After': limitResult.retryAfter.toString(),
-          }
+          },
         },
       );
+      res.headers.set('x-request-id', requestId);
+      return res;
     }
   }
 

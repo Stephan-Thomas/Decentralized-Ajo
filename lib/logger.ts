@@ -100,3 +100,9 @@ export function createChildLogger(meta: Record<string, unknown>) {
 }
 
 export default logger;
+
+/** Create a child logger bound to a request id (when available). */
+export function createRequestLogger(requestId?: string | null) {
+  const id = requestId ?? 'unknown';
+  return logger.child({ requestId: id });
+}
