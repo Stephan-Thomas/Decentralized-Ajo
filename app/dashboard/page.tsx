@@ -14,6 +14,7 @@ import { Dashboard } from '@/components/dashboard';
 import { DashboardStats } from '@/components/dashboard/dashboard-stats';
 import { DashboardStatsSkeleton } from '@/components/dashboard/stats-skeleton';
 import { CircleList } from '@/components/dashboard/circle-list';
+import { formatAmount } from '@/lib/utils';
 import DashboardCard from '@/components/DashboardCard';
 import DashboardSkeleton from '@/components/dashboard-skeleton';
 import {
@@ -114,7 +115,7 @@ export default function DashboardPage() {
         return {
           id: circle.id,
           name: circle.name,
-          balance: `${totalBalance.toLocaleString()} XLM`,
+          balance: `${formatAmount(totalBalance)} XLM`,
           nextCycle,
         };
       });

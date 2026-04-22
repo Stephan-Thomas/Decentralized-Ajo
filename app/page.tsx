@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CircleList } from '@/components/dashboard/circle-list';
 import { authenticatedFetch } from '@/lib/auth-client';
+import { formatAmount } from '@/lib/utils';
 import {
   Pagination,
   PaginationContent,
@@ -209,7 +210,7 @@ export default function Home() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {circles.reduce((acc, c) => acc + (c.contributionAmount || 0), 0).toFixed(2)} XLM
+                {formatAmount(circles.reduce((acc, c) => acc + (c.contributionAmount || 0), 0))} XLM
               </div>
               <p className="text-xs text-muted-foreground">Combined contributions</p>
             </CardContent>

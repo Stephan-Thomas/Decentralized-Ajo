@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { authenticatedFetch } from '@/lib/auth-client';
+import { formatAmount } from '@/lib/utils';
 
 interface CirclePreview {
   id: string;
@@ -198,7 +199,7 @@ function JoinCircleContent() {
               <div className="grid grid-cols-3 gap-4 text-center">
                 <div className="p-3 rounded-lg bg-muted">
                   <TrendingUp className="h-4 w-4 mx-auto mb-1 text-muted-foreground" />
-                  <p className="text-lg font-bold">{preview.contributionAmount} XLM</p>
+                  <p className="text-lg font-bold">{formatAmount(preview.contributionAmount)} XLM</p>
                   <p className="text-xs text-muted-foreground">Per round</p>
                 </div>
                 <div className="p-3 rounded-lg bg-muted">

@@ -3,6 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { CircleDot, ArrowRight, Wallet, Users, LayoutGrid } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { CircleListSkeleton } from './circle-list-skeleton';
+import { formatAmount } from '@/lib/utils';
 
 interface Circle {
   id: string;
@@ -74,7 +75,7 @@ export function CircleList({ circles, loading }: CircleListProps) {
                   <p className="text-[10px] uppercase font-bold text-muted-foreground flex items-center gap-1">
                     <Wallet className="h-3 w-3" /> Entry
                   </p>
-                  <p className="text-sm font-semibold">{circle.contributionAmount} XLM</p>
+                  <p className="text-sm font-semibold">{formatAmount(circle.contributionAmount)} XLM</p>
                 </div>
               </div>
               <div className="border-t pt-4 flex items-center justify-between text-primary font-bold text-xs">
